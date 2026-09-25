@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal e Gestão - Sistema Aluguel</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <style>
+        .font-signature {
+            font-family: 'Segoe Script', 'Lucida Handwriting', 'Brush Script MT', cursive !important;
+            font-size: 1.8rem;
+            color: #000000;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCJPmxX0UFSrAMfdoRzdgExxVJGTs-CYmU",
+            authDomain: "sistema-gestao-aluguel.firebaseapp.com",
+            projectId: "sistema-gestao-aluguel",
+            storageBucket: "sistema-gestao-aluguel.firebasestorage.app",
+            messagingSenderId: "907148496048",
+            appId: "1:907148496048:web:64600c79e1079966c9ff75"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+
+        const formatCPF = (value) => {
+            return value
+                .replace(/\D/g, '')
+                .replace(/(\d{3})(\d)/, '$1.$2')
+                .replace(/(\d{3})(\d)/, '$1.$2')
+                .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+                .replace(/(-\d{2})\d+?$/, '$1');
+        };
+
+        function App() {
+            const [userRole, setUserRole] = useState('login');
+            const [currentTenant, setCurrentTenant] = useState(null);
+
+            const [properties, setProperties] = useState([]);
+            const [tenants, setTenants] = useState([]);
+            const [receipts, setReceipts] = useState([]);
+
+            const [loginCpf, setLoginCpf] = useState('');
+            const [loginPass, setLoginPass] = useState('');
+            
+            // Estados para Edição / Criação de Imóveis (Com SABESP e EDP)
+            const [editingPropId, setEditingPropId] = useState(null);
+            const [newPropAddr, setNewPropAddr] = useState('');
+            const [newPropRent, setNewPropRent] = useState('');
+            const [newPropSabesp, setNewPropSabesp] = useState('');
+            const [newPropEdp, setNewPropEdp] = useState('');
+            
+            // Estados para Edição de Locatários
+            const [editingTenantId, setEditingTenantId] = useState(null);
+            const [tName, setTName] = useState('');
+            const [tCpf, setTCpf] = useState('');
+            const [tPass, setTPass] = useState('');
+            const [tPropertyId, setTPropertyId] = useState('');
+            const [tRentValue, setTRentValue] = useState('');
+            const [tStartDate, setTStartDate] = useState('');
+            const [tEndDate, setTEndDate] = useState('');
+            const [tDueDate, setTDueDate] = useState('10');
+            const [tIndex, setTIndex] = useState('IGP-M');
+            const [tGuarantee, setTGuarantee] = useState('Caução (3x)');
+            const [tStatus, setTStatus] = useState('Adimplente');
+            const [tContractLink, setTContractLink] = useState('');
+
+            // Estados para Emissão / Edição de Recibos
+            const [editingReceiptId, setEditingReceiptId] = useState(null);
+            const [recMonth, setRecMonth] = useState('Outubro/2026');
+            const [recValue, setRecValue] = useState('');
+            const [selectedTenantId, setSelectedTenantId] = useState('');
+
+            // Estado para Filtro de Recibos na Administração
+            const [filterReceiptTenantId, setFilterReceiptTenantId] = useState('');
+
+            // Estado para visualizar recibo modal (Locatário)
+            const [selectedReceipt, setSelectedReceipt] = useState(null);
+
+            // Estado para modal do guia de titularidade (Sabesp / EDP)
+            const [selectedGuideModal, setSelectedGuideModal] = useState(null);
+
+            useEffect(() => {
+                db.collection('properties').onSnapshot(snapshot => {
+                    setProperties(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                db.collection('tenants').onSnapshot(snapshot => {
+                    setTenants(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                db.collection('receipts').onSnapshot(snapshot => {
+                    setReceipts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+            }, []);
+
+            const handleOwnerLogin = (e) => {
+                e.preventDefault();
+                if(loginCpf === '123.456.789-00' && loginPass === 'demo2026') {
+                    setUserRole('owner');
+                } else {
+                    alert('Credenciais incorretas.');
+                }
+            };
+
+            const handleTenantLogin = (e) => {
+                e.preventDefault();
+                const found = tenants.find(t => t.cpf === loginCpf && t.pass === loginPass);
+                if(found) {
+                    setCurrentTenant(found);
+                    setUserRole('tenant');
+                } else {
+                    alert('CPF ou palavra-passe incorretos.');
+                }
+            };
+
+            // Salvar ou Atualizar Imóvel (com SABESP e EDP)
+            const handleSaveProperty = async (e) => {
+                e.preventDefault();
+                const propData = {
+                    address: newPropAddr,
+                    rent: Number(newPropRent),
+                    sabesp: newPropSabesp,
+                    edp: newPropEdp
+                };
+
+                if (editingPropId) {
+                    await db.collection('properties').doc(editingPropId).update(propData);
+                    setEditingPropId(null);
+                    alert('Imóvel atualizado com sucesso!');
+                } else {
+                    await db.collection('properties').add(propData);
+                    alert('Imóvel adicionado com sucesso!');
+                }
+                setNewPropAddr('');
+                setNewPropRent('');
+                setNewPropSabesp('');
+                setNewPropEdp('');
+            };
+
+            const handleEditPropertyClick = (p) => {
+                setEditingPropId(p.id);
+                setNewPropAddr(p.address || '');
+                setNewPropRent(p.rent || '');
+                setNewPropSabesp(p.sabesp || '');
+                setNewPropEdp(p.edp || '');
+            };
+
+            const handleCancelEditProperty = () => {
+                setEditingPropId(null);
+                setNewPropAddr('');
+                setNewPropRent('');
+                setNewPropSabesp('');
+                setNewPropEdp('');
+            };
+
+            const handleDeleteProperty = async (id) => {
+                if (confirm('Tem certeza que deseja remover este imóvel?')) {
+                    await db.collection('properties').doc(id).delete();
+                }
+            };
+
+            // Salvar ou Atualizar Locatário
+            const handleSaveTenant = async (e) => {
+                e.preventDefault();
+                const selectedProp = properties.find(p => p.id === tPropertyId);
+                const tenantData = {
+                    name: tName,
+                    cpf: tCpf,
+                    pass: tPass,
+                    propertyId: tPropertyId,
+                    propertyAddress: selectedProp ? selectedProp.address : 'Não vinculado',
+                    propertySabesp: selectedProp ? (selectedProp.sabesp || '') : '',
+                    propertyEdp: selectedProp ? (selectedProp.edp || '') : '',
+                    rentValue: Number(tRentValue),
+                    startDate: tStartDate,
+                    endDate: tEndDate,
+                    dueDate: Number(tDueDate),
+                    index: tIndex,
+                    guarantee: tGuarantee,
+                    status: tStatus,
+                    contractLink: tContractLink
+                };
+
+                if (editingTenantId) {
+                    await db.collection('tenants').doc(editingTenantId).update(tenantData);
+                    setEditingTenantId(null);
+                    alert('Locatário atualizado com sucesso!');
+                } else {
+                    await db.collection('tenants').add(tenantData);
+                    alert('Locatário cadastrado com sucesso!');
+                }
+
+                setTName(''); setTCpf(''); setTPass(''); setTPropertyId(''); setTRentValue(''); setTStartDate(''); setTEndDate(''); setTContractLink('');
+            };
+
+            const handleEditTenantClick = (t) => {
+                setEditingTenantId(t.id);
+                setTName(t.name || '');
+                setTCpf(t.cpf || '');
+                setTPass(t.pass || '');
+                setTPropertyId(t.propertyId || '');
+                setTRentValue(t.rentValue || '');
+                setTStartDate(t.startDate || '');
+                setTEndDate(t.endDate || '');
+                setTDueDate(t.dueDate || '10');
+                setTIndex(t.index || 'IGP-M');
+                setTGuarantee(t.guarantee || '');
+                setTStatus(t.status || 'Adimplente');
+                setTContractLink(t.contractLink || '');
+            };
+
+            const handleCancelEditTenant = () => {
+                setEditingTenantId(null);
+                setTName(''); setTCpf(''); setTPass(''); setTPropertyId(''); setTRentValue(''); setTStartDate(''); setTEndDate(''); setTContractLink('');
+            };
+
+            const handleDeleteTenant = async (id) => {
+                if (confirm('Deseja realmente remover este locatário?')) {
+                    await db.collection('tenants').doc(id).delete();
+                }
+            };
+
+            // Salvar ou Atualizar Recibo
+            const handleSaveReceipt = async (e) => {
+                e.preventDefault();
+                const tenant = tenants.find(t => t.id === selectedTenantId);
+                if (!tenant && !editingReceiptId) { alert('Selecione um locatário.'); return; }
+
+                const receiptData = {
+                    month: recMonth,
+                    value: Number(recValue),
+                    date: new Date().toLocaleDateString('pt-BR')
+                };
+
+                if (tenant) {
+                    receiptData.tenantId = tenant.id;
+                    receiptData.tenantName = tenant.name;
+                    receiptData.tenantCpf = tenant.cpf;
+                    receiptData.propertyAddress = tenant.propertyAddress;
+                }
+
+                if (editingReceiptId) {
+                    await db.collection('receipts').doc(editingReceiptId).update(receiptData);
+                    setEditingReceiptId(null);
+                    alert('Recibo atualizado com sucesso!');
+                } else {
+                    await db.collection('receipts').add(receiptData);
+                    alert('Recibo emitido com sucesso!');
+                }
+                setRecValue('');
+                setSelectedTenantId('');
+            };
+
+            const handleEditReceiptClick = (r) => {
+                setEditingReceiptId(r.id);
+                setSelectedTenantId(r.tenantId || '');
+                setRecMonth(r.month || '');
+                setRecValue(r.value || '');
+            };
+
+            const handleCancelEditReceipt = () => {
+                setEditingReceiptId(null);
+                setSelectedTenantId('');
+                setRecValue('');
+            };
+
+            const handleDeleteReceipt = async (id) => {
+                if (confirm('Deseja realmente excluir este recibo?')) {
+                    await db.collection('receipts').doc(id).delete();
+                }
+            };
+
+            const filteredReceipts = filterReceiptTenantId 
+                ? receipts.filter(r => r.tenantId === filterReceiptTenantId)
+                : receipts;
+
+            if (userRole === 'login') {
+                return (
+                    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+                        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6">
+                            <div className="text-center flex justify-between items-center mb-2">
+                                <a href="index.html" className="text-xs bg-slate-200 text-slate-700 px-3 py-1 rounded hover:bg-slate-300 font-medium">← Voltar à Capa</a>
+                            </div>
+                            <div className="text-center">
+                                <h1 className="text-2xl font-bold text-slate-950">Sistema Gestão Aluguel</h1>
+                                <p className="text-sm text-slate-500 mt-1">Plataforma Cloud (Firebase)</p>
+                            </div>
+                            <div className="space-y-4 pt-4 border-t">
+                                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Acesso Administração</h2>
+                                <form onSubmit={handleOwnerLogin} className="space-y-3">
+                                    <input type="text" placeholder="CPF (000.000.000-00)" value={loginCpf} onChange={e => setLoginCpf(formatCPF(e.target.value))} maxLength="14" className="w-full border p-2.5 rounded-lg text-sm" required />
+                                    <input type="password" placeholder="Palavra-passe (admin)" value={loginPass} onChange={e => setLoginPass(e.target.value)} className="w-full border p-2.5 rounded-lg text-sm" required />
+                                    <button type="submit" className="w-full bg-slate-900 text-white font-medium py-2.5 rounded-lg text-sm hover:bg-slate-800">Entrar como Administração</button>
+                                </form>
+                            </div>
+                            <div className="space-y-4 pt-4 border-t">
+                                <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-600">Acesso Locatário</h2>
+                                <form onSubmit={handleTenantLogin} className="space-y-3">
+                                    <input type="text" placeholder="Seu CPF (000.000.000-00)" value={loginCpf} onChange={e => setLoginCpf(formatCPF(e.target.value))} maxLength="14" className="w-full border p-2.5 rounded-lg text-sm" required />
+                                    <input type="password" placeholder="Sua palavra-passe" value={loginPass} onChange={e => setLoginPass(e.target.value)} className="w-full border p-2.5 rounded-lg text-sm" required />
+                                    <button type="submit" className="w-full bg-emerald-600 text-white font-medium py-2.5 rounded-lg text-sm hover:bg-emerald-700">Entrar no Portal do Locatário</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (userRole === 'owner') {
+                return (
+                    <div className="min-h-screen flex flex-col bg-slate-50">
+                        <header className="bg-slate-900 text-white p-4 flex justify-between items-center shadow">
+                            <span className="font-bold text-base">Painel da Administração - Cloud Firebase</span>
+                            <button onClick={() => setUserRole('login')} className="text-xs bg-slate-800 px-3 py-1.5 rounded hover:bg-slate-700">Sair</button>
+                        </header>
+                        <main className="flex-1 max-w-4xl w-full mx-auto p-6 space-y-6">
+                            
+                            {/* Bloco Imóvel (Com SABESP e EDP) */}
+                            <div className={`p-6 rounded-xl shadow-sm border space-y-4 transition ${editingPropId ? 'bg-amber-50/50 border-amber-300' : 'bg-white'}`}>
+                                <div className="flex justify-between items-center">
+                                    <h3 className="font-semibold text-slate-900">
+                                        {editingPropId ? '✏️ Editando Imóvel' : 'Cadastrar Novo Imóvel'}
+                                    </h3>
+                                    {editingPropId && (
+                                        <button onClick={handleCancelEditProperty} className="text-xs bg-slate-200 text-slate-700 px-2.5 py-1 rounded hover:bg-slate-300 font-medium">Cancelar Edição</button>
+                                    )}
+                                </div>
+                                <form onSubmit={handleSaveProperty} className="space-y-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <input type="text" placeholder="Endereço do Imóvel" value={newPropAddr} onChange={e => setNewPropAddr(e.target.value)} className="border p-2 rounded text-sm bg-white" required />
+                                        <input type="number" placeholder="Valor do Aluguel (R$)" value={newPropRent} onChange={e => setNewPropRent(e.target.value)} className="border p-2 rounded text-sm bg-white" required />
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <input type="text" placeholder="N° de Fornecimento SABESP" value={newPropSabesp} onChange={e => setNewPropSabesp(e.target.value)} className="border p-2 rounded text-sm bg-white" />
+                                        <input type="text" placeholder="N° de Fornecimento UC EDP" value={newPropEdp} onChange={e => setNewPropEdp(e.target.value)} className="border p-2 rounded text-sm bg-white" />
+                                    </div>
+                                    <button type="submit" className={`w-full py-2.5 rounded text-sm font-medium text-white ${editingPropId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-900 hover:bg-slate-800'}`}>
+                                        {editingPropId ? 'Salvar Alterações do Imóvel' : 'Adicionar Imóvel'}
+                                    </button>
+                                </form>
+
+                                <div className="pt-4 border-t mt-4">
+                                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Imóveis Cadastrados ({properties.length})</h4>
+                                    {properties.length === 0 ? (
+                                        <p className="text-xs text-slate-400 italic">Nenhum imóvel cadastrado ainda.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {properties.map(p => (
+                                                <div key={p.id} className="flex justify-between items-center p-3 bg-white border rounded text-sm shadow-sm">
+                                                    <div>
+                                                        <p className="font-medium text-slate-800">🏠 {p.address}</p>
+                                                        <p className="text-xs text-slate-500 font-semibold mt-0.5">Valor Padrão: R$ {p.rent}</p>
+                                                        <div className="mt-1 flex gap-4 text-xs text-slate-600">
+                                                            {p.sabesp && <span>💧 SABESP: <strong>{p.sabesp}</strong></span>}
+                                                            {p.edp && <span>⚡ EDP: <strong>{p.edp}</strong></span>}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => handleEditPropertyClick(p)} className="text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded border border-amber-200 hover:bg-amber-100 font-medium">Editar</button>
+                                                        <button onClick={() => handleDeleteProperty(p.id)} className="text-xs bg-rose-50 text-rose-600 px-2.5 py-1 rounded border border-rose-200 hover:bg-rose-100 font-medium">Remover</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Bloco Locatário */}
+                            <div className={`p-6 rounded-xl shadow-sm border space-y-4 transition ${editingTenantId ? 'bg-amber-50/50 border-amber-300' : 'bg-white'}`}>
+                                <div className="flex justify-between items-center">
+                                    <h3 className="font-semibold text-slate-900">
+                                        {editingTenantId ? '✏️ Editando Locatário' : 'Cadastrar Locatário, Contrato & Acessos'}
+                                    </h3>
+                                    {editingTenantId && (
+                                        <button onClick={handleCancelEditTenant} className="text-xs bg-slate-200 text-slate-700 px-2.5 py-1 rounded hover:bg-slate-300 font-medium">Cancelar Edição</button>
+                                    )}
+                                </div>
+                                <form onSubmit={handleSaveTenant} className="space-y-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        <input type="text" placeholder="Nome Completo" value={tName} onChange={e => setTName(e.target.value)} className="border p-2 rounded text-sm bg-white" required />
+                                        <input type="text" placeholder="CPF (000.000.000-00)" value={tCpf} onChange={e => setTCpf(formatCPF(e.target.value))} maxLength="14" className="border p-2 rounded text-sm bg-white" required />
+                                        <input type="password" placeholder="Palavra-passe de Acesso" value={tPass} onChange={e => setTPass(e.target.value)} className="border p-2 rounded text-sm bg-white" required />
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        <select value={tPropertyId} onChange={e => {
+                                            setTPropertyId(e.target.value);
+                                            const p = properties.find(item => item.id === e.target.value);
+                                            if(p && !tRentValue) setTRentValue(p.rent);
+                                        }} className="border p-2 rounded text-sm bg-white" required>
+                                            <option value="">Selecione o Imóvel</option>
+                                            {properties.map(p => <option key={p.id} value={p.id}>{p.address}</option>)}
+                                        </select>
+                                        <input type="number" placeholder="Valor do Aluguel (R$)" value={tRentValue} onChange={e => setTRentValue(e.target.value)} className="border p-2 rounded text-sm bg-white" required />
+                                        <input type="number" placeholder="Dia de Vencimento" value={tDueDate} onChange={e => setTDueDate(e.target.value)} className="border p-2 rounded text-sm bg-white" required />
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                                        <div>
+                                            <label className="text-xs text-slate-500 block mb-1">Início da Locação</label>
+                                            <input type="date" value={tStartDate} onChange={e => setTStartDate(e.target.value)} className="w-full border p-2 rounded text-sm bg-white" required />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-slate-500 block mb-1">Término da Locação</label>
+                                            <input type="date" value={tEndDate} onChange={e => setTEndDate(e.target.value)} className="w-full border p-2 rounded text-sm bg-white" required />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-slate-500 block mb-1">Índice de Reajuste</label>
+                                            <input type="text" placeholder="Ex: IGP-M" value={tIndex} onChange={e => setTIndex(e.target.value)} className="w-full border p-2 rounded text-sm bg-white" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-slate-500 block mb-1">Status de Pagamento</label>
+                                            <select value={tStatus} onChange={e => setTStatus(e.target.value)} className="w-full border p-2 rounded text-sm font-medium bg-white">
+                                                <option value="Adimplente">Adimplente (Regular)</option>
+                                                <option value="Inadimplente">Inadimplente (Pendente)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <input type="text" placeholder="Garantia (ex: Caução 3x)" value={tGuarantee} onChange={e => setTGuarantee(e.target.value)} className="border p-2 rounded text-sm bg-white" />
+                                        <input type="url" placeholder="Link Drive de Arquivos (Google Drive / OneDrive)" value={tContractLink} onChange={e => setTContractLink(e.target.value)} className="border p-2 rounded text-sm bg-white" />
+                                    </div>
+
+                                    <button type="submit" className={`w-full font-medium p-2.5 rounded text-sm text-white ${editingTenantId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                                        {editingTenantId ? 'Salvar Alterações do Locatário' : 'Cadastrar Locatário Completo'}
+                                    </button>
+                                </form>
+                            </div>
+
+                            {/* Bloco Emissão e Gestão Limpa de Recibos */}
+                            <div className={`p-6 rounded-xl shadow-sm border space-y-4 transition ${editingReceiptId ? 'bg-amber-50/50 border-amber-300' : 'bg-white'}`}>
+                                <div className="flex justify-between items-center">
+                                    <h3 className="font-semibold text-slate-900">
+                                        {editingReceiptId ? '✏️ Editando Recibo' : 'Emitir Recibo de Pagamento'}
+                                    </h3>
+                                    {editingReceiptId && (
+                                        <button onClick={handleCancelEditReceipt} className="text-xs bg-slate-200 text-slate-700 px-2.5 py-1 rounded hover:bg-slate-300 font-medium">Cancelar Edição</button>
+                                    )}
+                                </div>
+                                <form onSubmit={handleSaveReceipt} className="space-y-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        <select value={selectedTenantId} onChange={e => setSelectedTenantId(e.target.value)} className="border p-2 rounded text-sm bg-white" required={!editingReceiptId}>
+                                            <option value="">Selecione o Locatário</option>
+                                            {tenants.map(t => <option key={t.id} value={t.id}>{t.name} - {t.propertyAddress}</option>)}
+                                        </select>
+                                        <input type="text" placeholder="Mês (ex: Outubro/2026)" value={recMonth} onChange={e => setRecMonth(e.target.value)} className="border p-2 rounded text-sm bg-white" required />
+                                        <input type="number" placeholder="Valor Pago (R$)" value={recValue} onChange={e => setRecValue(e.target.value)} className="border p-2 rounded text-sm bg-white" required />
+                                    </div>
+                                    <button type="submit" className={`w-full font-medium p-2.5 rounded text-sm text-white ${editingReceiptId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-900 hover:bg-slate-800'}`}>
+                                        {editingReceiptId ? 'Salvar Alterações do Recibo' : 'Emitir e Publicar Recibo'}
+                                    </button>
+                                </form>
+
+                                <div className="pt-4 border-t mt-4 space-y-3">
+                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Recibos Emitidos</h4>
+                                        <select value={filterReceiptTenantId} onChange={e => setFilterReceiptTenantId(e.target.value)} className="border p-1.5 rounded text-xs bg-white text-slate-700">
+                                            <option value="">Filtrar por Locatário (Mostrar Todos)</option>
+                                            {tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                        </select>
+                                    </div>
+
+                                    {filteredReceipts.length === 0 ? (
+                                        <p className="text-xs text-slate-400 italic">Nenhum recibo encontrado para este filtro.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {filteredReceipts.map(r => (
+                                                <div key={r.id} className="flex justify-between items-center p-3 bg-white border rounded text-sm shadow-sm">
+                                                    <div>
+                                                        <p className="font-medium text-slate-900">👤 {r.tenantName || 'Locatário'} | <span className="text-emerald-700 font-semibold">Ref: {r.month}</span></p>
+                                                        <p className="text-xs text-slate-500">Valor: R$ {r.value} | Emitido em: {r.date}</p>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => handleEditReceiptClick(r)} className="text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded border border-amber-200 hover:bg-amber-100 font-medium">Editar</button>
+                                                        <button onClick={() => handleDeleteReceipt(r.id)} className="text-xs bg-rose-50 text-rose-600 px-2.5 py-1 rounded border border-rose-200 hover:bg-rose-100 font-medium">Excluir</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl shadow-sm border space-y-3">
+                                <h3 className="font-semibold text-slate-900">Locatários Cadastrados</h3>
+                                <div className="space-y-2">
+                                    {tenants.length === 0 ? (
+                                        <p className="text-xs text-slate-400 italic">Nenhum locatário cadastrado ainda.</p>
+                                    ) : (
+                                        tenants.map(t => (
+                                            <div key={t.id} className="flex justify-between items-center p-3 bg-slate-50 border rounded text-sm">
+                                                <div>
+                                                    <p className="font-medium text-slate-900">{t.name} (CPF: {t.cpf})</p>
+                                                    <p className="text-xs text-slate-600">🏠 <strong>Imóvel:</strong> {t.propertyAddress} | <strong>Aluguel:</strong> R$ {t.rentValue}</p>
+                                                    <p className="text-xs text-slate-500">Período: {t.startDate} até {t.endDate} | Vencimento: Dia {t.dueDate}</p>
+                                                    <div className="mt-1 flex items-center gap-2">
+                                                        <span className={`text-xs px-2 py-0.5 rounded font-bold ${t.status === 'Adimplente' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                                                            {t.status}
+                                                        </span>
+                                                        {t.contractLink && <a href={t.contractLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline">Ver Link Drive</a>}
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => handleEditTenantClick(t)} className="text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded border border-amber-200 hover:bg-amber-100 font-medium">Editar</button>
+                                                    <button onClick={() => handleDeleteTenant(t.id)} className="text-xs bg-rose-50 text-rose-600 px-2.5 py-1 rounded border border-rose-200 hover:bg-rose-100 font-medium">Remover</button>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                        </main>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen flex flex-col bg-slate-50">
+                    <header className="bg-emerald-600 text-white p-4 flex justify-between items-center shadow">
+                        <span className="font-bold">Portal do Locatário - {currentTenant?.name}</span>
+                        <button onClick={() => setUserRole('login')} className="text-xs bg-emerald-700 px-3 py-1.5 rounded hover:bg-emerald-800">Sair</button>
+                    </header>
+                    <main className="flex-1 max-w-3xl w-full mx-auto p-6 space-y-6">
+                        
+                        <div className="bg-white p-6 rounded-xl shadow-sm border space-y-4">
+                            <div className="flex justify-between items-start">
+                                <h3 className="text-lg font-semibold text-slate-900">Detalhes do Contrato & Imóvel</h3>
+                                <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${currentTenant?.status === 'Adimplente' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                                    Situação: {currentTenant?.status || 'Adimplente'}
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-slate-600 bg-slate-50 p-4 rounded-lg border">
+                                <p className="sm:col-span-2"><strong>🏠 Imóvel:</strong> {currentTenant?.propertyAddress}</p>
+                                
+                                {/* Exibição dos Números de Fornecimento no Portal do Locatário */}
+                                {properties.find(p => p.id === currentTenant?.propertyId)?.sabesp && (
+                                    <p><strong>💧 N° SABESP:</strong> <span className="font-mono text-slate-800">{properties.find(p => p.id === currentTenant?.propertyId).sabesp}</span></p>
+                                )}
+                                {properties.find(p => p.id === currentTenant?.propertyId)?.edp && (
+                                    <p><strong>⚡ N° UC EDP:</strong> <span className="font-mono text-slate-800">{properties.find(p => p.id === currentTenant?.propertyId).edp}</span></p>
+                                )}
+
+                                <p><strong>💰 Valor do Aluguel:</strong> R$ {currentTenant?.rentValue}</p>
+                                <p><strong>📅 Vencimento:</strong> Todo dia {currentTenant?.dueDate}</p>
+                                <p><strong>⏳ Início da Locação:</strong> {currentTenant?.startDate}</p>
+                                <p><strong>🏁 Término da Locação:</strong> {currentTenant?.endDate}</p>
+                                <p><strong>📈 Reajuste:</strong> {currentTenant?.index}</p>
+                                <p><strong>🛡️ Garantia:</strong> {currentTenant?.guarantee}</p>
+                            </div>
+                            {currentTenant?.contractLink ? (
+                                <div className="pt-2">
+                                    <a href={currentTenant.contractLink} target="_blank" rel="noopener noreferrer" className="inline-block bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+                                        📁 Aceder ao Link Drive de Arquivos (Contratos/Documentos)
+                                    </a>
+                                </div>
+                            ) : null}
+                        </div>
+
+                        {/* GUIA DE TROCA DE TITULARIDADE (ÁGUA E LUZ) */}
+                        <div className="bg-white p-6 rounded-xl shadow-sm border space-y-4">
+                            <h3 className="text-lg font-semibold text-slate-900">💧⚡ Guia de Troca de Titularidade</h3>
+                            <p className="text-xs text-slate-500">Consulte o passo a passo oficial para alterar a titularidade das contas:</p>
+                            
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                                <div className="border rounded-xl p-4 bg-slate-50 flex flex-col justify-between space-y-3">
+                                    <div>
+                                        <h4 className="font-bold text-slate-900 text-sm">💧 Sabesp (Água e Esgoto)</h4>
+                                        <p className="text-xs text-slate-600 mt-1">Passo a passo e documentos necessários.</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <button onClick={() => setSelectedGuideModal('sabesp')} className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium py-2 rounded-lg border border-blue-200 transition">
+                                            📋 Ver Guia Passo a Passo
+                                        </button>
+                                        <a href="https://www.sabesp.com.br" target="_blank" rel="noopener noreferrer" className="block text-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium py-2 rounded-lg transition">
+                                            🌐 Aceder ao Site da Sabesp
+                                        </a>
+                                    </div>
+                                </div>
+
+                                <div className="border rounded-xl p-4 bg-slate-50 flex flex-col justify-between space-y-3">
+                                    <div>
+                                        <h4 className="font-bold text-slate-900 text-sm">⚡ EDP (Energia Elétrica)</h4>
+                                        <p className="text-xs text-slate-600 mt-1">Passo a passo e documentos necessários.</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <button onClick={() => setSelectedGuideModal('edp')} className="w-full bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-medium py-2 rounded-lg border border-amber-200 transition">
+                                            📋 Ver Guia Passo a Passo
+                                        </button>
+                                        <a href="https://www.edp.com.br" target="_blank" rel="noopener noreferrer" className="block text-center bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium py-2 rounded-lg transition">
+                                            🌐 Aceder ao Site da EDP
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-xl shadow-sm border space-y-4">
+                            <h3 className="text-lg font-semibold text-slate-900">Recibos Emitidos pela Administração</h3>
+                            <div className="space-y-2">
+                                {receipts.filter(r => r.tenantId === currentTenant?.id).length === 0 ? (
+                                    <p className="text-xs text-slate-500">Nenhum recibo emitido ainda.</p>
+                                ) : (
+                                    receipts.filter(r => r.tenantId === currentTenant?.id).map(r => (
+                                        <div key={r.id} className="p-3 bg-slate-50 border rounded flex justify-between items-center text-sm">
+                                            <div>
+                                                <p className="font-medium text-emerald-700">Recibo referente a {r.month}</p>
+                                                <p className="text-xs text-slate-500">Emitido em: {r.date}</p>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <span className="font-bold text-slate-900">R$ {r.value}</span>
+                                                <button onClick={() => setSelectedReceipt(r)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded font-medium transition">
+                                                    📄 Ver Recibo Oficial
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-xl shadow-sm border space-y-3">
+                            <h3 className="text-lg font-semibold text-slate-900 text-center">Dados para Pagamento</h3>
+                            <p className="text-xs text-slate-500 text-center mb-4">Utilize os dados bancários ou a chave Pix abaixo para efetuar o pagamento mensal:</p>
+                            
+                            <div className="bg-slate-50 p-4 rounded-lg border text-sm space-y-2 text-slate-700">
+                                <p><strong>🏦 Banco:</strong> 336 – Banco C6 S.A.</p>
+                                <p><strong>📍 Agência:</strong> 0001 | <strong>Conta Corrente:</strong> 1942070-6</p>
+                                <p><strong>🔑 Chave Pix (CPF):</strong> <span className="font-mono font-bold text-slate-900">281.508.128-81</span></p>
+                                <p><strong>👤 Titular / Beneficiário:</strong> Débora do Nascimento Fantini</p>
+                            </div>
+                        </div>
+
+                        {selectedGuideModal && (
+                            <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+                                <div className="bg-white max-w-lg w-full rounded-2xl shadow-2xl p-6 border space-y-4 relative my-8">
+                                    <button onClick={() => setSelectedGuideModal(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 font-bold text-lg bg-slate-100 w-8 h-8 rounded-full flex items-center justify-center">✕</button>
+                                    
+                                    <div className="text-center border-b pb-3">
+                                        <h3 className="text-lg font-bold text-slate-900">
+                                            {selectedGuideModal === 'sabesp' ? '💧 Troca de Titularidade - Sabesp' : '⚡ Troca de Titularidade - EDP'}
+                                        </h3>
+                                        <p className="text-xs text-slate-500">Procedimento rápido e sem débitos pendentes</p>
+                                    </div>
+
+                                    <div className="space-y-3 text-sm text-slate-700">
+                                        <div className="bg-slate-50 p-3 rounded-lg border">
+                                            <h4 className="font-bold text-slate-900 mb-1">📄 1. Documentos Necessários:</h4>
+                                            <ul className="list-disc list-inside text-xs space-y-1 text-slate-600">
+                                                <li>CPF e RG do novo titular</li>
+                                                <li>Contrato de Locação (ou Escritura)</li>
+                                                <li>{selectedGuideModal === 'sabesp' ? 'Comprovante de residência / Fatura anterior (opcional)' : 'Número de Instalação (UC) e última fatura'}</li>
+                                            </ul>
+                                        </div>
+
+                                        <div className="bg-slate-50 p-3 rounded-lg border">
+                                            <h4 className="font-bold text-slate-900 mb-1">👣 2. Passo a Passo:</h4>
+                                            <ol className="list-decimal list-inside text-xs space-y-1 text-slate-600">
+                                                <li>Prepare a documentação digitalizada (PDF ou foto).</li>
+                                                <li>Aceda ao site oficial ou aplicativo da concessionária.</li>
+                                                <li>Selecione a opção de <strong>Troca de Titularidade</strong>.</li>
+                                                <li>Preencha os dados e faça o upload dos documentos.</li>
+                                                <li>Aguarde a confirmação por email.</li>
+                                            </ol>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2 pt-2">
+                                        <a 
+                                            href={selectedGuideModal === 'sabesp' ? 'image.png' : 'image_2.png'} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer" 
+                                            className="block w-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-medium py-2 rounded-lg text-center transition border"
+                                        >
+                                            🖼️ Ver Infográfico Original Completo (Imagem)
+                                        </a>
+
+                                        <div className="flex gap-3">
+                                            <a 
+                                                href={selectedGuideModal === 'sabesp' ? 'https://www.sabesp.com.br' : 'https://www.edp.com.br'} 
+                                                target="_blank" 
+                                                rel="noopener noreferrer" 
+                                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-2.5 rounded-lg text-center transition"
+                                            >
+                                                🌐 Aceder ao Site Oficial
+                                            </a>
+                                            <button onClick={() => setSelectedGuideModal(null)} className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-medium py-2.5 rounded-lg transition">
+                                                Fechar Guia
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {selectedReceipt && (
+                            <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                                <div className="bg-white max-w-lg w-full rounded-2xl shadow-2xl p-8 border space-y-6 relative">
+                                    <button onClick={() => setSelectedReceipt(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+                                    
+                                    <div className="text-center border-b pb-4">
+                                        <h2 className="text-xl font-bold text-slate-900">RECIBO DE PAGAMENTO DE ALUGUEL</h2>
+                                        <p className="text-xs text-slate-500 mt-1">Comprovativo Oficial de Quitação</p>
+                                    </div>
+
+                                    <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex justify-between items-center">
+                                        <span className="text-sm font-semibold text-emerald-900">Valor Quitado:</span>
+                                        <span className="text-xl font-bold text-emerald-700">R$ {selectedReceipt.value.toFixed(2)}</span>
+                                    </div>
+
+                                    <div className="text-sm space-y-3 text-slate-700 leading-relaxed text-justify">
+                                        <p>
+                                            Recebi(emos) de <strong className="text-slate-900">{currentTenant.name}</strong>, inscrito(a) no CPF sob o nº <strong className="text-slate-900">{currentTenant.cpf}</strong>, a importância supra de <strong>R$ {selectedReceipt.value.toFixed(2)}</strong>, referente ao pagamento do aluguel do imóvel situado à <strong className="text-slate-900">{selectedReceipt.propertyAddress || currentTenant.propertyAddress}</strong>, referente ao mês de <strong className="text-slate-900">{selectedReceipt.month}</strong>.
+                                        </p>
+                                    </div>
+
+                                    <div className="pt-6 border-t space-y-4 text-center">
+                                        <div className="flex flex-col items-center">
+                                            <span className="font-signature -mb-1 select-none">Débora do Nascimento Fantini</span>
+                                            <div className="w-64 border-b border-slate-400 my-1"></div>
+                                            <p className="text-xs font-bold text-slate-800">Débora do Nascimento Fantini</p>
+                                            <p className="text-xs text-slate-500">Administradora | CPF: 281.508.128-81</p>
+                                            <p className="text-xs text-slate-400 mt-1">Data de emissão: {selectedReceipt.date}</p>
+                                        </div>
+
+                                        <div className="flex gap-3 pt-2">
+                                            <button onClick={() => window.print()} className="flex-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium py-2.5 rounded-lg transition">
+                                                🖨️ Imprimir / Guardar PDF
+                                            </button>
+                                            <button onClick={() => setSelectedReceipt(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium py-2.5 rounded-lg transition">
+                                                Fechar
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
+                        )}
+
+                    </main>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
